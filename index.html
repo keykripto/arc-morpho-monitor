@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Arc Morpho Market Monitor</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0b0b0f;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 650px;
+            padding: 25px;
+        }
+
+        .card {
+            background: #15151c;
+            border: 1px solid #292932;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 15px 50px rgba(0,0,0,.35);
+        }
+
+        h1 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 25px;
+        }
+
+        .pair {
+            color: #aaa;
+            margin-bottom: 30px;
+        }
+
+        .liquidity-label {
+            color: #999;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .liquidity {
+            font-size: 42px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .status {
+            padding: 14px;
+            border-radius: 12px;
+            font-weight: bold;
+            margin-bottom: 25px;
+        }
+
+        .available {
+            background: rgba(40, 200, 100, .12);
+            border: 1px solid rgba(40, 200, 100, .35);
+        }
+
+        .empty {
+            background: rgba(255, 70, 70, .12);
+            border: 1px solid rgba(255, 70, 70, .35);
+        }
+
+        .error {
+            background: rgba(255, 170, 0, .12);
+            border: 1px solid rgba(255, 170, 0, .35);
+        }
+
+        .row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #25252d;
+            color: #aaa;
+        }
+
+        .row:last-child {
+            border-bottom: none;
+        }
+
+        .value {
+            color: white;
+            font-weight: bold;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 25px;
+            padding: 13px;
+            border: 0;
+            border-radius: 10px;
+            background: #ffffff;
+            color: #000000;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            opacity: .9;
+        }
+
+        .small {
+            margin-top: 18px;
+            text-align: center;
+            color: #777;
+            font-size: 12px;
+        }
+
+        .link {
+            color: #aaa;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="card">
+
+        <h1>Arc Morpho Market Monitor</h1>
+
+        <div class="pair">
+            USDC / cirBTC
+        </div>
+
+        <div class="liquidity-label">
+            Available Market Liquidity
+        </div>
+
+        <div id="liquidity" class="liquidity">
+            Loading...
+        </div>
+
+        <div id="status" class="status">
+            Checking market...
+        </div>
+
+        <div class="row">
+            <span>Total Market Liquidity</span>
+            <span id="marketLiquidity" class="value">-</span>
+        </div>
+
+        <div class="row">
+            <span>Reallocatable Liquidity</span>
+            <span id="reallocatable" class="value">-</span>
+        </div>
+
+        <div class="row">
+            <span>Last Indexed Block</span>
+            <span id="block" class="value">-</span>
+        </div>
+
+        <div class="row">
+            <span>Last Check</span>
+            <span id="lastCheck" class="value">-</span>
+        </div>
+
+        <button onclick="requestNotificationPermission()">
+            🔔 Bildirimleri Aç
+        </button>
+
+        <div class="small">
+            Otomatik kontrol: 60 saniye
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    // ==========================================
+    // MORPHO MARKET
+    // ==========================================
+
+    const CHAIN_ID = 5042;
+
+    const MARKET_ID =
+        "0xc2db905f174e5defcce01d321b09f15f78856a36a21b90cc7e1abbc29225815d";
+
+    const API_URL =
+        `https://api.morpho.org/v0/blue/markets/${CHAIN_ID}:${MARKET_ID}/liquidity`;
+
+
+    // USDC has 6 decimals
+    const USDC_DECIMALS = 6;
+
+
+    // Previous liquidity value
+    let previousLiquidity = null;
+
+
+    // ==========================================
+    // FORMAT USDC
+    // ==========================================
+
+    function formatUSDC(rawValue) {
+
+        const value =
+            Number(rawValue) / Math.pow(10, USDC_DECIMALS);
+
+        return new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }).format(value);
+    }
+
+
+    // ==========================================
+    // CHECK MARKET
+    // ==========================================
+
+    async function checkMarket() {
+
+        const liquidityElement =
+            document.getElementById("liquidity");
+
+        const statusElement =
+            document.getElementById("status");
+
+        try {
+
+            const response = await fetch(API_URL, {
+                cache: "no-store"
+            });
+
+            if (!response.ok) {
+                throw new Error(
+                    "API error: " + response.status
+                );
+            }
+
+            const result = await response.json();
+
+            const data = result.data;
+
+            const rawLiquidity =
+                data.market_liquidity || "0";
+
+            const rawReallocatable =
+                data.reallocatable_liquidity || "0";
+
+            const liquidity =
+                Number(rawLiquidity) /
+                Math.pow(10, USDC_DECIMALS);
+
+
+            // ======================================
+            // MAIN DISPLAY
+            // ======================================
+
+            liquidityElement.innerText =
+                formatUSDC(rawLiquidity);
+
+
+            document.getElementById(
+                "marketLiquidity"
+            ).innerText =
+                formatUSDC(rawLiquidity);
+
+
+            document.getElementById(
+                "reallocatable"
+            ).innerText =
+                formatUSDC(rawReallocatable);
+
+
+            document.getElementById(
+                "block"
+            ).innerText =
+                data.last_indexed_block || "-";
+
+
+            document.getElementById(
+                "lastCheck"
+            ).innerText =
+                new Date().toLocaleTimeString();
+
+
+            // ======================================
+            // STATUS
+            // ======================================
+
+            if (liquidity > 0) {
+
+                statusElement.innerText =
+                    "🟢 LIQUIDITY AVAILABLE";
+
+                statusElement.className =
+                    "status available";
+
+            } else {
+
+                statusElement.innerText =
+                    "🔴 NO LIQUIDITY";
+
+                statusElement.className =
+                    "status empty";
+            }
+
+
+            // ======================================
+            // NOTIFICATION
+            // ======================================
+
+            if (
+                previousLiquidity !== null &&
+                previousLiquidity <= 0 &&
+                liquidity > 0
+            ) {
+
+                sendNotification(liquidity);
+
+            }
+
+
+            previousLiquidity = liquidity;
+
+        }
+
+        catch (error) {
+
+            console.error(error);
+
+            liquidityElement.innerText =
+                "API Error";
+
+            statusElement.innerText =
+                "🟠 API bağlantısı başarısız";
+
+            statusElement.className =
+                "status error";
+
+            document.getElementById(
+                "lastCheck"
+            ).innerText =
+                new Date().toLocaleTimeString();
+        }
+    }
+
+
+    // ==========================================
+    // BROWSER NOTIFICATION
+    // ==========================================
+
+    async function requestNotificationPermission() {
+
+        if (!("Notification" in window)) {
+
+            alert(
+                "Bu tarayıcı bildirimleri desteklemiyor."
+            );
+
+            return;
+        }
+
+
+        const permission =
+            await Notification.requestPermission();
+
+
+        if (permission === "granted") {
+
+            new Notification(
+                "Morpho Monitor aktif",
+                {
+                    body:
+                        "Arc USDC/cirBTC marketi izleniyor."
+                }
+            );
+
+        }
+    }
+
+
+    // ==========================================
+    // SEND NOTIFICATION
+    // ==========================================
+
+    function sendNotification(liquidity) {
+
+        const message =
+            `Arc USDC/cirBTC marketinde ` +
+            `${formatUSDC(liquidity)} ` +
+            `likidite mevcut.`;
+
+
+        // Browser notification
+        if (
+            "Notification" in window &&
+            Notification.permission === "granted"
+        ) {
+
+            new Notification(
+                "🟢 Morpho'da Likidite Geldi!",
+                {
+                    body: message
+                }
+            );
+
+        }
+
+
+        // Also show browser alert
+        alert(
+            "🟢 LIQUIDITY AVAILABLE!\n\n" +
+            message
+        );
+    }
+
+
+    // ==========================================
+    // FIRST CHECK
+    // ==========================================
+
+    checkMarket();
+
+
+    // ==========================================
+    // AUTO REFRESH
+    // 60 SECONDS
+    // ==========================================
+
+    setInterval(
+        checkMarket,
+        60 * 1000
+    );
+
+</script>
+
+</body>
+</html>
